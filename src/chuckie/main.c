@@ -73,10 +73,11 @@ static const uint16_t spr_palettes[2][4] = {
 #define LEVEL_CLEAR_FRAMES   90U
 #define GAME_OVER_FRAMES   180U
 
-#define STATE_PLAYING     0
-#define STATE_DYING       1
-#define STATE_LEVEL_CLEAR 2
-#define STATE_GAME_OVER   3
+#define STATE_TITLE       0
+#define STATE_PLAYING     1
+#define STATE_DYING       2
+#define STATE_LEVEL_CLEAR 3
+#define STATE_GAME_OVER   4
 
 #define COLL_INSET_H  2
 #define COLL_INSET_V  3
@@ -136,6 +137,29 @@ static uint8_t  harry_lives;
 static uint16_t score;
 static uint8_t  current_level;
 static uint8_t  state_timer;
+
+/* ---- Title screen state ---- */
+static int16_t title_x;
+static int8_t  title_dx;
+static uint8_t title_walk_timer;
+static uint8_t title_anim_frame;
+static uint8_t title_blink_timer;
+static uint8_t title_blink_show;
+static uint8_t title_input_delay;
+
+static const uint8_t TITLE_CHUCKIE[7] = {
+    TILE_LETTER_C, TILE_LETTER_H, TILE_LETTER_U, TILE_LETTER_C,
+    TILE_LETTER_K, TILE_LETTER_I, TILE_LETTER_E
+};
+static const uint8_t TITLE_EGG[3] = {
+    TILE_LETTER_E, TILE_LETTER_G, TILE_LETTER_G
+};
+static const uint8_t TITLE_PRESS_A[7] = {
+    TILE_LETTER_P, TILE_LETTER_R, TILE_LETTER_E,
+    TILE_LETTER_S, TILE_LETTER_S, TILE_EMPTY, TILE_LETTER_A
+};
+static const uint8_t TITLE_BLANK[7]   = {0,0,0,0,0,0,0};
+static const uint8_t TITLE_EMPTY_ROW[20] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 
 /* ---- Sound effects ---- */
 
@@ -512,6 +536,115 @@ static void try_collect(int16_t px, int16_t py) {
     }
 }
 
+/* ---- Title screen ---- */
+
+static void title_write_row(uint8_t row, uint8_t col,
+                             const uint8_t *t, uint8_t len, uint8_t pal) {
+    uint8_t i;
+    for (i = 0; i < len; i++) {
+        VBK_REG = 0; set_bkg_tiles(col + i, row, 1, 1, &t[i]);
+        VBK_REG = 1; set_bkg_tiles(col + i, row, 1, 1, &pal);
+    }
+    VBK_REG = 0;
+}
+
+static void title_clear_bg(void) {
+    uint8_t r;
+    uint8_t z = 0;
+    for (r = 0; r < LEVEL_ROWS; r++) {
+        VBK_REG = 0; set_bkg_tiles(0, r, 20, 1, TITLE_EMPTY_ROW);
+        VBK_REG = 1; set_bkg_tiles(0, r, 20, 1, TITLE_EMPTY_ROW);
+    }
+    VBK_REG = 0;
+    (void)z;
+}
+
+static void init_title(void) {
+    uint8_t i;
+
+    title_clear_bg();
+
+    /* "CHUCKIE" centred at row 4, yellow (palette 3) */
+    title_write_row(4, 6, TITLE_CHUCKIE, 7, 3);
+    /* "EGG" centred at row 6, yellow (palette 3) */
+    title_write_row(6, 8, TITLE_EGG, 3, 3);
+
+    /* Hide all sprites — Harry will be placed by title_update */
+    for (i = 0; i < 40; i++) move_sprite(i, 0, 0);
+
+    title_x           = 0;
+    title_dx          = 1;
+    title_walk_timer  = 0;
+    title_anim_frame  = 0;
+    title_blink_timer = 0;
+    title_blink_show  = 1;
+    title_input_delay = 60;   /* ignore input for first second */
+
+    HIDE_WIN;
+    game_state = STATE_TITLE;
+}
+
+static void title_update(void) {
+    uint8_t keys;
+
+    /* Walk Harry across the bottom of the screen */
+    title_walk_timer++;
+    if (title_walk_timer >= 4U) {
+        title_walk_timer = 0;
+        title_x += (int16_t)title_dx;
+        if (title_x >= 152) { title_dx = -1; }
+        if (title_x <= 0)   { title_dx =  1; }
+        title_anim_frame ^= 1;
+    }
+    {
+        uint8_t tile = title_anim_frame ? HARRY_TILE_W1 : HARRY_TILE_W0;
+        uint8_t attr = (title_dx < 0) ? S_FLIPX : 0U;
+        set_sprite_tile(0, tile);
+        set_sprite_prop(0, attr);
+        move_sprite(0, (uint8_t)(title_x + 8), 136);  /* floor level */
+    }
+
+    /* Blink "PRESS A" every 30 frames */
+    title_blink_timer++;
+    if (title_blink_timer >= 30U) {
+        title_blink_timer = 0;
+        title_blink_show ^= 1;
+        if (title_blink_show) {
+            title_write_row(11, 6, TITLE_PRESS_A, 7, 7);
+        } else {
+            title_write_row(11, 6, TITLE_BLANK, 7, 0);
+        }
+    }
+
+    /* Accept input after the delay */
+    if (title_input_delay > 0) { title_input_delay--; return; }
+
+    keys = joypad();
+    if (keys & (J_A | J_START)) {
+        /* Reset and start game */
+        SHOW_WIN;
+        harry_lives   = HARRY_START_LIVES;
+        score         = 0;
+        current_level = 0;
+        load_level(current_level);
+        birds_init(current_level);
+        for (title_input_delay = 1; title_input_delay < 40; title_input_delay++)
+            move_sprite(title_input_delay, 0, 0);
+        harry_x          = HARRY_START_X;
+        harry_y          = (int16_t)(HARRY_START_ROW * 8) - HARRY_H;
+        harry_vy         = 0;
+        on_ground        = 1;
+        climbing         = 0;
+        climb_lock       = 0;
+        facing_left      = 0;
+        anim_timer       = 0;
+        anim_frame       = 0;
+        invincible_timer = INVINCIBLE_FRAMES;
+        hud_update();
+        game_state = STATE_PLAYING;
+    }
+}
+
 /* ---- Harry per-frame update ---- */
 
 static void harry_update(void) {
@@ -661,8 +794,6 @@ static void harry_update(void) {
 /* ---- Entry point ---- */
 
 void main(void) {
-    uint8_t i;
-
     SPRITES_8x16;
 
     /* Sound: enable master, full volume, all channels both speakers */
@@ -678,40 +809,23 @@ void main(void) {
     set_sprite_palette(0, 2, (uint16_t *)spr_palettes);
 
     move_win(0, 136);
-    SHOW_WIN;
 
-    harry_lives   = HARRY_START_LIVES;
-    score         = 0;
-    current_level = 0;
-    game_state    = STATE_PLAYING;
-    state_timer   = 0;
-
-    load_level(current_level);
-    birds_init(current_level);
-
-    for (i = 1; i < 40; i++) move_sprite(i, 0, 0);
-
-    harry_x          = HARRY_START_X;
-    harry_y          = (int16_t)(HARRY_START_ROW * 8) - HARRY_H;
-    harry_vy         = 0;
-    on_ground        = 1;
-    climbing         = 0;
-    climb_lock       = 0;
-    facing_left      = 0;
-    anim_timer       = 0;
-    anim_frame       = 0;
-    invincible_timer = INVINCIBLE_FRAMES;
-
-    hud_update();
+    state_timer = 0;
 
     SHOW_BKG;
     SHOW_SPRITES;
     DISPLAY_ON;
 
+    init_title();
+
     while (1) {
         wait_vbl_done();
 
         switch (game_state) {
+
+            case STATE_TITLE:
+                title_update();
+                break;
 
             case STATE_PLAYING:
                 harry_update();
@@ -775,13 +889,7 @@ void main(void) {
                 if (state_timer > 0) {
                     state_timer--;
                 } else {
-                    harry_lives   = HARRY_START_LIVES;
-                    score         = 0;
-                    current_level = 0;
-                    load_level(0);
-                    birds_init(0);
-                    respawn_harry();
-                    hud_update();
+                    init_title();
                 }
                 break;
         }
