@@ -6,6 +6,8 @@
 #include "harry.h"
 #include "bird_tiles.h"
 #include "bird_data.h"
+#include "lift_data.h"
+#include "lift_tile.h"
 
 /* cgb.h already defines RGB(r,g,b) */
 #define COL_BLACK   RGB( 0,  0,  0)
@@ -26,9 +28,10 @@ static const uint16_t bg_palettes[8][4] = {
     /* 7 HUD             */ {COL_BLACK,   COL_WHITE,   COL_BLACK,   COL_WHITE  },
 };
 
-static const uint16_t spr_palettes[2][4] = {
+static const uint16_t spr_palettes[3][4] = {
     /* 0 Harry  */ {COL_BLACK, COL_YELLOW, COL_BLACK, COL_YELLOW},
     /* 1 Chicks */ {COL_BLACK, COL_CYAN,   COL_BLACK, COL_CYAN  },
+    /* 2 Lift   */ {COL_BLACK, COL_GREEN,  COL_BLACK, COL_GREEN },
 };
 
 /* ---- Harry constants ---- */
@@ -60,6 +63,8 @@ static const uint16_t spr_palettes[2][4] = {
 #define BIRD_TILE_W1     (BIRD_TILE_BASE + 2)
 #define BIRD_TILE_EAT    (BIRD_TILE_BASE + 4)
 
+#define LIFT_TILE_BASE   20   /* after bird tiles 14-19 */
+
 /* ---- Game constants ---- */
 #define HARRY_START_LIVES  5U
 #define HARRY_START_X      8
@@ -88,6 +93,8 @@ static const uint16_t spr_palettes[2][4] = {
 #define FREQ_C5  1797U   /* C5 ~523Hz */
 #define FREQ_E5  1849U   /* E5 ~659Hz */
 #define FREQ_G5  1881U   /* G5 ~784Hz */
+#define FREQ_A5  1899U   /* A5 ~880Hz */
+#define FREQ_B5  1915U   /* B5 ~988Hz */
 #define FREQ_C6  1923U   /* C6 ~1047Hz */
 #define FREQ_LO(f) ((uint8_t)((f) & 0xFFU))
 #define FREQ_HI(f) ((uint8_t)(((f) >> 8) & 0x07U))
@@ -124,6 +131,7 @@ static uint8_t on_ground;
 static uint8_t climbing;
 static uint8_t climb_lock;
 static uint8_t climb_start_row;
+static uint8_t on_lift;
 static uint8_t facing_left;
 static uint8_t invincible_timer;
 static uint8_t anim_timer;
@@ -137,6 +145,36 @@ static uint8_t  harry_lives;
 static uint16_t score;
 static uint8_t  current_level;
 static uint8_t  state_timer;
+
+/* ---- Lift state ---- */
+static uint8_t  lift_col;     /* tile column of this level's lift (0 = none) */
+static int16_t  lift_y;       /* current top pixel of the lift car */
+static int8_t   lift_dy;      /* movement direction: +1 down, -1 up */
+static uint8_t  lift_timer;
+static uint8_t  on_lift;      /* Harry is riding the lift */
+
+/* ---- Background music ("Little Brown Jug", G major) ---- */
+
+static const uint16_t MUSIC_NOTES[20] = {
+    /* "Ha ha ha, you and me" */
+    FREQ_G5,FREQ_G5,FREQ_G5, FREQ_E5,FREQ_G5,FREQ_A5,
+    /* "Lit-tle brown jug, don't I" */
+    FREQ_G5,FREQ_G5,FREQ_G5, FREQ_E5,FREQ_G5,FREQ_B5,
+    /* "love thee" */
+    FREQ_C6,FREQ_B5,FREQ_A5,FREQ_G5,
+    /* loop transition */
+    FREQ_A5,FREQ_B5,FREQ_G5,0U
+};
+static const uint8_t MUSIC_DURS[20] = {
+    15,15,15, 15,15,15,
+    15,15,15, 15,15,15,
+    30,15,15,30,
+    15,15,30,15
+};
+#define MUSIC_LEN 20U
+
+static uint8_t music_note_idx;
+static uint8_t music_frame_cnt;
 
 /* ---- Title screen state ---- */
 static int16_t title_x;
@@ -269,6 +307,12 @@ static void load_level(uint8_t idx) {
     eggs_collected  = 0;
     grain_collected = 0;
     draw_level();
+
+    lift_col   = lift_cols[idx];
+    lift_y     = (int16_t)((LIFT_TOP + LIFT_BOTTOM) / 2);
+    lift_dy    = 1;
+    lift_timer = 0;
+    if (!lift_col) move_sprite(6, 0, 0);  /* hide lift sprite if unused */
 }
 
 /* ---- HUD ---- */
@@ -351,25 +395,26 @@ static void bird_update_one(uint8_t i) {
         if (b->move_timer >= BIRD_MOVE_PERIOD) {
             b->move_timer = 0;
             new_pos   = b->y + (int16_t)b->climb_dir;
-            /* clamp feet to play area — same boundary as Harry */
-            if (new_pos + BIRD_H > (int16_t)(HARRY_START_ROW * 8))
-                new_pos = (int16_t)(HARRY_START_ROW * 8) - BIRD_H;
             center_px = new_pos + BIRD_H / 2;
 
-            if (center_px < 0 || center_px >= (int16_t)(LEVEL_ROWS * 8)) {
-                b->climbing = 0;
-                b->dx = (rand8() & 1) ? (int8_t)1 : (int8_t)-1;
+            if (center_px < 0 ||
+                new_pos + BIRD_H >= (int16_t)(HARRY_START_ROW * 8)) {
+                /* Off top of screen or reached floor boundary */
+                if (new_pos + BIRD_H >= (int16_t)(HARRY_START_ROW * 8))
+                    b->y = (int16_t)(HARRY_START_ROW * 8) - BIRD_H;
+                b->climbing  = 0;
+                b->dx        = (rand8() & 1) ? (int8_t)1 : (int8_t)-1;
+                b->dir_timer = BIRD_DIR_MIN;
             } else {
                 center_row = (uint8_t)((uint16_t)center_px >> 3);
                 if (tile_at_px(cx, center_px) == TILE_LADDER_PLATFORM &&
                     center_row != b->climb_start_row) {
-                    b->y = (int16_t)center_row * 8 - BIRD_H;
-                    b->climbing = 0;
-                    b->dx = (rand8() & 1) ? (int8_t)1 : (int8_t)-1;
+                    b->y         = (int16_t)center_row * 8 - BIRD_H;
+                    b->climbing  = 0;
+                    b->dx        = (rand8() & 1) ? (int8_t)1 : (int8_t)-1;
+                    b->dir_timer = BIRD_DIR_MIN;
                 } else if (!is_ladder(tile_at_px(cx, center_px)) &&
                            center_row != b->climb_start_row) {
-                    /* Ladder ended without a LADDER_PLATFORM junction.
-                       Snap down to the nearest floor so the bird isn't stuck. */
                     {
                         int16_t sy = (int16_t)center_row * 8;
                         while (sy + BIRD_H < (int16_t)(LEVEL_ROWS * 8)) {
@@ -381,9 +426,10 @@ static void bird_update_one(uint8_t i) {
                             sy += 8;
                         }
                     }
-                    b->y = new_pos;
-                    b->climbing = 0;
-                    b->dx = (rand8() & 1) ? (int8_t)1 : (int8_t)-1;
+                    b->y         = new_pos;
+                    b->climbing  = 0;
+                    b->dx        = (rand8() & 1) ? (int8_t)1 : (int8_t)-1;
+                    b->dir_timer = BIRD_DIR_MIN;
                 } else {
                     b->y = new_pos;
                 }
@@ -417,7 +463,7 @@ static void bird_update_one(uint8_t i) {
                 uint8_t lad_col = (uint8_t)((uint16_t)cx >> 3);
                 int16_t lad_cx  = (int16_t)(lad_col * 8 + 4);
                 uint8_t mid_t   = tile_at_px(lad_cx, b->y + BIRD_H / 2);
-                if (is_ladder(mid_t)) {
+                if (is_ladder(mid_t) && (rand8() & 1) == 0) {
                     uint8_t can_up   = is_ladder(tile_at_px(lad_cx, b->y - 8));
                     uint8_t can_down = is_ladder(tile_at_px(lad_cx,
                                                  b->y + BIRD_H + 8));
@@ -502,6 +548,7 @@ static void respawn_harry(void) {
     anim_timer       = 0;
     anim_frame       = 0;
     invincible_timer = INVINCIBLE_FRAMES;
+    on_lift          = 0;
     move_sprite(0, (uint8_t)(harry_x + 8), (uint8_t)(harry_y + 16));
     game_state = STATE_PLAYING;
 }
@@ -534,6 +581,49 @@ static void try_collect(int16_t px, int16_t py) {
         hud_update();
         sfx_grain();
     }
+}
+
+/* ---- Background music ---- */
+
+static void music_stop(void) {
+    NR22_REG = 0x00;
+    NR24_REG = 0x80;
+    music_note_idx  = 0;
+    music_frame_cnt = 0;
+}
+
+static void music_update(void) {
+    if (music_frame_cnt > 0) { music_frame_cnt--; return; }
+    if (music_note_idx >= MUSIC_LEN) music_note_idx = 0;
+    {
+        uint16_t f       = MUSIC_NOTES[music_note_idx];
+        music_frame_cnt  = MUSIC_DURS[music_note_idx];
+        music_note_idx++;
+        if (f == 0U) {
+            NR22_REG = 0x00; NR24_REG = 0x80;   /* rest */
+        } else {
+            NR21_REG = 0x40;                     /* 25% duty */
+            NR22_REG = 0x90;                     /* vol=9, sustained */
+            NR23_REG = FREQ_LO(f);
+            NR24_REG = (uint8_t)(0x80U | FREQ_HI(f));
+        }
+    }
+}
+
+/* ---- Lift ---- */
+
+static void lift_update(void) {
+    if (!lift_col) return;
+    lift_timer++;
+    if (lift_timer >= 2U) {
+        lift_timer = 0;
+        lift_y += (int16_t)lift_dy;
+        if (lift_y <= (int16_t)LIFT_TOP)    { lift_dy =  1; lift_y = LIFT_TOP;    }
+        if (lift_y >= (int16_t)LIFT_BOTTOM) { lift_dy = -1; lift_y = LIFT_BOTTOM; }
+    }
+    set_sprite_tile(6, LIFT_TILE_BASE);
+    set_sprite_prop(6, 2);   /* sprite palette 2 = green */
+    move_sprite(6, (uint8_t)(lift_col * 8 + 8), (uint8_t)(lift_y + 16));
 }
 
 /* ---- Title screen ---- */
@@ -640,7 +730,9 @@ static void title_update(void) {
         anim_timer       = 0;
         anim_frame       = 0;
         invincible_timer = INVINCIBLE_FRAMES;
+        on_lift          = 0;
         hud_update();
+        music_stop();    /* reset to bar 1 */
         game_state = STATE_PLAYING;
     }
 }
@@ -703,7 +795,51 @@ static void harry_update(void) {
         }
     }
 
-    if (!climbing) {
+    if (on_lift) {
+        /* Track lift position */
+        harry_y   = lift_y - HARRY_H;
+        on_ground = 1;
+        harry_vy  = 0;
+
+        /* Horizontal movement still works on the lift */
+        if (keys & J_RIGHT) {
+            new_x = harry_x + WALK_SPEED;
+            facing_left = 0;
+            if (!is_wall(tile_at_px(new_x + HARRY_W - 1, harry_y + 4)) &&
+                !is_wall(tile_at_px(new_x + HARRY_W - 1, harry_y + HARRY_H - 2))) {
+                harry_x = new_x; moved_h = 1;
+            }
+        } else if (keys & J_LEFT) {
+            new_x = harry_x - WALK_SPEED;
+            facing_left = 1;
+            if (new_x >= 0 &&
+                !is_wall(tile_at_px(new_x, harry_y + 4)) &&
+                !is_wall(tile_at_px(new_x, harry_y + HARRY_H - 2))) {
+                harry_x = new_x; moved_h = 1;
+            }
+        }
+
+        /* Jump off the lift */
+        if (keys & J_A) {
+            on_lift   = 0;
+            harry_vy  = -JUMP_VEL;
+            on_ground = 0;
+            sfx_jump();
+        }
+
+        /* Auto-dismount when lift reaches a real platform */
+        if (on_lift) {
+            int16_t foot = harry_y + HARRY_H;
+            if (is_floor(tile_at_px(harry_x + 1,           foot)) ||
+                is_floor(tile_at_px(harry_x + HARRY_W - 2, foot))) {
+                uint8_t fr = (uint8_t)((uint16_t)foot >> 3);
+                harry_y = (int16_t)fr * 8 - HARRY_H;
+                on_lift = 0;
+            }
+        }
+    }
+
+    if (!climbing && !on_lift) {
         if (keys & J_RIGHT) {
             new_x = harry_x + WALK_SPEED;
             facing_left = 0;
@@ -737,8 +873,23 @@ static void harry_update(void) {
 
         if (harry_vy >= 0) {
             int16_t foot = new_y + HARRY_H;
-            if (is_floor(tile_at_px(harry_x + 1,           foot)) ||
-                is_floor(tile_at_px(harry_x + HARRY_W - 2, foot))) {
+
+            /* Lift landing: check before regular floor */
+            if (lift_col && !on_lift) {
+                int16_t lx = (int16_t)lift_col * 8;
+                if (harry_x + HARRY_W > lx && harry_x < lx + (int16_t)LIFT_W &&
+                    harry_y + HARRY_H <= lift_y &&
+                    foot >= lift_y && foot <= lift_y + 4) {
+                    new_y     = lift_y - HARRY_H;
+                    harry_vy  = 0;
+                    on_ground = 1;
+                    on_lift   = 1;
+                }
+            }
+
+            if (!on_lift &&
+                (is_floor(tile_at_px(harry_x + 1,           foot)) ||
+                 is_floor(tile_at_px(harry_x + HARRY_W - 2, foot)))) {
                 uint8_t fr = (uint8_t)((uint16_t)foot >> 3);
                 new_y      = (int16_t)fr * 8 - HARRY_H;
                 harry_vy   = 0;
@@ -804,9 +955,10 @@ void main(void) {
     set_bkg_data(0, NUM_TILES, (uint8_t *)tiles);
     set_sprite_data(HARRY_TILE_BASE, HARRY_NUM_TILES, (uint8_t *)harry_tiles);
     set_sprite_data(BIRD_TILE_BASE,  BIRD_NUM_TILES,  (uint8_t *)bird_tiles);
+    set_sprite_data(LIFT_TILE_BASE,  LIFT_NUM_TILES,  (uint8_t *)lift_tiles);
 
     set_bkg_palette(0, 8, (uint16_t *)bg_palettes);
-    set_sprite_palette(0, 2, (uint16_t *)spr_palettes);
+    set_sprite_palette(0, 3, (uint16_t *)spr_palettes);
 
     move_win(0, 136);
 
@@ -828,17 +980,21 @@ void main(void) {
                 break;
 
             case STATE_PLAYING:
+                lift_update();
                 harry_update();
                 birds_update();
+                music_update();
                 if (invincible_timer == 0 && check_bird_collision()) {
                     game_state  = STATE_DYING;
                     state_timer = DEATH_FLASH_FRAMES;
+                    music_stop();
                     sfx_death();
                     if (harry_lives == 1) sfx_death_tune(FREQ_E5);
                 }
                 break;
 
             case STATE_DYING:
+                lift_update();
                 /* sad tune only on the last life */
                 if (harry_lives == 1) {
                     if      (state_timer == DEATH_FLASH_FRAMES - 20U) sfx_death_tune(FREQ_C5);
@@ -864,6 +1020,7 @@ void main(void) {
                         state_timer = GAME_OVER_FRAMES;
                     } else {
                         respawn_harry();
+                        music_stop();   /* restart music from bar 1 */
                     }
                 }
                 break;
@@ -882,6 +1039,7 @@ void main(void) {
                     birds_init(current_level);
                     respawn_harry();
                     hud_update();
+                    music_stop();
                 }
                 break;
 

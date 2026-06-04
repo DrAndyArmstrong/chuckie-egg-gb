@@ -25,7 +25,7 @@ $(LEVEL_DATA): scenes.basm tools/convert_levels.py
 	python3 tools/convert_levels.py > $@
 
 $(CHUCKIE_ROM): $(CHUCKIE_SRC) $(LEVEL_DATA) $(TILESET_H) $(HARRY_H) $(BIRD_H) | roms
-	$(LCC) -Wm-yc -o $@ $(CHUCKIE_SRC)
+	$(LCC) -Wm-yc -Wm-yn"CHUCKIE EGG" -o $@ $(CHUCKIE_SRC)
 
 clean:
 	rm -f roms/*.gb
