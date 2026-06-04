@@ -6,6 +6,14 @@ The original game was written by Nigel Alderton. This port is a fan project buil
 
 ---
 
+## Play online
+
+**[► Play in your browser](https://DrAndyArmstrong.github.io/chuckie-egg-gb/)**
+
+Or drag `roms/chuckie.gb` into any Game Boy emulator.
+
+---
+
 ## Screenshots
 
 | Title screen | Level 1 |

@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chuckie Egg GB</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #1a1a2e;
+      color: #e0e0e0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    header {
+      width: 100%;
+      max-width: 700px;
+      padding: 2.5rem 1.5rem 1rem;
+      text-align: center;
+    }
+
+    h1 {
+      font-size: 2.4rem;
+      letter-spacing: 0.08em;
+      color: #f7c948;
+      text-shadow: 0 0 24px #f7c94855;
+    }
+
+    .tagline {
+      color: #888;
+      font-size: 0.95rem;
+      margin-top: 0.4rem;
+    }
+
+    /* ---- screenshots ---- */
+    .screenshots {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin: 1.8rem 0;
+    }
+    .screenshots img {
+      border-radius: 8px;
+      border: 2px solid #0f3460;
+      width: 220px;
+      image-rendering: pixelated;
+    }
+
+    /* ---- play button ---- */
+    #launch-btn {
+      background: #f7c948;
+      color: #1a1a2e;
+      border: none;
+      border-radius: 10px;
+      padding: 0.85rem 2.6rem;
+      font-size: 1.15rem;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+      transition: background 0.15s, transform 0.1s;
+      margin-bottom: 0.9rem;
+    }
+    #launch-btn:hover { background: #ffe075; transform: translateY(-2px); }
+
+    .dl-link {
+      display: block;
+      color: #9fef00;
+      font-size: 0.82rem;
+      text-decoration: none;
+      margin-bottom: 2rem;
+    }
+    .dl-link:hover { text-decoration: underline; }
+
+    /* ---- controls ---- */
+    .controls {
+      display: flex;
+      gap: 2rem;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-bottom: 2.5rem;
+      font-size: 0.88rem;
+    }
+    .ctrl { text-align: center; }
+    .ctrl kbd {
+      display: inline-block;
+      background: #0f3460;
+      border: 1px solid #1e5fa8;
+      border-radius: 5px;
+      padding: 0.2rem 0.55rem;
+      font-family: monospace;
+      font-size: 0.82rem;
+      margin-bottom: 0.25rem;
+    }
+    .ctrl p { color: #888; }
+
+    /* ---- emulator ---- */
+    #emu-wrap {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      padding: 1rem;
+    }
+    #back-btn {
+      align-self: flex-start;
+      background: none;
+      border: 1px solid #0f3460;
+      color: #9fef00;
+      border-radius: 8px;
+      padding: 0.4rem 0.9rem;
+      cursor: pointer;
+      font-size: 0.85rem;
+      margin-bottom: 1rem;
+      margin-left: calc(50% - 320px);
+    }
+    @media (max-width: 680px) { #back-btn { margin-left: 0; } }
+    #back-btn:hover { border-color: #9fef00; }
+    #game { width: 640px; max-width: 100%; aspect-ratio: 160 / 144; }
+
+    footer {
+      margin-top: auto;
+      padding: 1.2rem;
+      color: #444;
+      font-size: 0.78rem;
+      text-align: center;
+    }
+    footer a { color: #666; }
+  </style>
+</head>
+<body>
+
+  <!-- Landing -->
+  <div id="landing">
+    <header>
+      <h1>CHUCKIE EGG</h1>
+      <p class="tagline">Game Boy Color port of the classic 1983 BBC Micro game</p>
+    </header>
+
+    <div class="screenshots">
+      <img src="screenshots/screenshot_title.png" alt="Title screen">
+      <img src="screenshots/screenshot_level1.png" alt="Level 1">
+    </div>
+
+    <button id="launch-btn" onclick="launchGame()">▶ Play Now</button>
+    <a class="dl-link" href="roms/chuckie.gb" download="chuckie.gb">Download ROM (.gb)</a>
+
+    <div class="controls">
+      <div class="ctrl"><kbd>← →</kbd><p>Walk</p></div>
+      <div class="ctrl"><kbd>↑ ↓</kbd><p>Climb ladder</p></div>
+      <div class="ctrl"><kbd>A</kbd><p>Jump</p></div>
+    </div>
+  </div>
+
+  <!-- Emulator -->
+  <div id="emu-wrap">
+    <button id="back-btn" onclick="goBack()">← Back</button>
+    <div id="game"></div>
+  </div>
+
+  <footer>
+    Fan port — not affiliated with A&amp;F Software &nbsp;|&nbsp;
+    <a href="https://github.com/DrAndyArmstrong/chuckie-egg-gb">Source on GitHub</a>
+  </footer>
+
+  <script>
+    function launchGame() {
+      document.getElementById('landing').style.display = 'none';
+      document.getElementById('emu-wrap').style.display = 'flex';
+
+      window.EJS_player    = '#game';
+      window.EJS_core      = 'gb';
+      window.EJS_gameUrl   = 'roms/chuckie.gb?v=' + Date.now();
+      window.EJS_gameName  = 'Chuckie Egg GB';
+      window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
+
+      const s = document.createElement('script');
+      s.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
+      document.body.appendChild(s);
+    }
+
+    function goBack() {
+      location.reload();
+    }
+  </script>
+
+</body>
+</html>
