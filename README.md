@@ -6,6 +6,14 @@ The original game was written by Nigel Alderton. This port is a fan project buil
 
 ---
 
+## Screenshots
+
+| Title screen | Level 1 |
+|:---:|:---:|
+| ![Title screen](screenshots/screenshot_title.png) | ![Level 1](screenshots/screenshot_level1.png) |
+
+---
+
 ## Play it now
 
 Open `web/index.html` in a browser — it loads the compiled ROM in an in-browser emulator with no install required. Or drag `roms/chuckie.gb` into any Game Boy emulator.
