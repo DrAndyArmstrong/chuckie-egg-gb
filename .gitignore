@@ -1,0 +1,6 @@
+sdk/
+*.o
+*.lst
+*.map
+*.noi
+*.sym

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GB Web Player</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #1a1a2e;
+      color: #e0e0e0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    h1 {
+      font-size: 2rem;
+      letter-spacing: 0.05em;
+      color: #9fef00;
+      margin-bottom: 0.25rem;
+    }
+
+    .subtitle {
+      color: #888;
+      font-size: 0.9rem;
+      margin-bottom: 2.5rem;
+    }
+
+    /* --- Landing --- */
+    #landing {
+      text-align: center;
+      max-width: 480px;
+      width: 100%;
+      padding: 2rem;
+    }
+
+    .card-row {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .card {
+      background: #16213e;
+      border: 1px solid #0f3460;
+      border-radius: 12px;
+      padding: 1.5rem 1.75rem;
+      cursor: pointer;
+      transition: border-color 0.2s, transform 0.1s;
+      width: 190px;
+      text-align: center;
+    }
+
+    .card:hover {
+      border-color: #9fef00;
+      transform: translateY(-2px);
+    }
+
+    .card-icon { font-size: 2.5rem; display: block; margin-bottom: 0.6rem; }
+    .card-title { font-weight: 600; margin-bottom: 0.25rem; }
+    .card-desc { font-size: 0.78rem; color: #888; }
+
+    .card-dl {
+      display: inline-block;
+      margin-top: 0.6rem;
+      font-size: 0.72rem;
+      color: #9fef00;
+      text-decoration: none;
+      border: 1px solid #9fef00;
+      border-radius: 4px;
+      padding: 0.15rem 0.5rem;
+    }
+    .card-dl:hover { background: #9fef0022; }
+
+    #rom-file-input { display: none; }
+
+    /* --- Player --- */
+    #player {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      padding: 1rem;
+    }
+
+    .player-header {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 1rem;
+      width: 100%;
+      max-width: 640px;
+    }
+
+    .back-btn {
+      background: none;
+      border: 1px solid #0f3460;
+      color: #9fef00;
+      border-radius: 8px;
+      padding: 0.4rem 0.9rem;
+      cursor: pointer;
+      font-size: 0.85rem;
+      transition: border-color 0.2s;
+    }
+    .back-btn:hover { border-color: #9fef00; }
+
+    #rom-label {
+      font-size: 0.9rem;
+      color: #888;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #game {
+      width: 640px;
+      max-width: 100%;
+      aspect-ratio: 160 / 144;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Landing -->
+  <div id="landing">
+    <h1>GB Web Player</h1>
+    <p class="subtitle">Game Boy ROM player — load your own or try the example</p>
+
+    <div class="card-row">
+      <div class="card" onclick="loadHelloWorld()">
+        <span class="card-icon">▶</span>
+        <div class="card-title">Hello World</div>
+        <div class="card-desc">Built-in example ROM</div>
+      </div>
+
+      <div class="card" onclick="startEmulator('../roms/chuckie.gb' + bust, 'Chuckie Egg', 'gb')">
+        <span class="card-icon">🐔</span>
+        <div class="card-title">Chuckie Egg</div>
+        <div class="card-desc">GB port — Phase 2 in progress</div>
+        <a class="card-dl" href="../roms/chuckie.gb" download="chuckie.gb" onclick="event.stopPropagation()">Download ROM</a>
+      </div>
+
+      <label class="card" for="rom-file-input">
+        <span class="card-icon">📂</span>
+        <div class="card-title">Load ROM</div>
+        <div class="card-desc">.gb or .gbc file from your device</div>
+        <input type="file" id="rom-file-input" accept=".gb,.gbc" onchange="loadFile(this)">
+      </label>
+    </div>
+  </div>
+
+  <!-- Player -->
+  <div id="player">
+    <div class="player-header">
+      <button class="back-btn" onclick="goBack()">← Back</button>
+      <span id="rom-label"></span>
+    </div>
+    <div id="game"></div>
+  </div>
+
+  <script>
+    let blobUrl = null;
+
+    const bust = '?v=' + Date.now();
+
+    function loadHelloWorld() {
+      startEmulator('../roms/hello.gb' + bust, 'Hello World', 'gb');
+    }
+
+    function loadFile(input) {
+      const file = input.files[0];
+      if (!file) return;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      blobUrl = URL.createObjectURL(file);
+      startEmulator(blobUrl, file.name);
+    }
+
+    function startEmulator(url, name, core) {
+      document.getElementById('landing').style.display = 'none';
+      const player = document.getElementById('player');
+      player.style.display = 'flex';
+      document.getElementById('rom-label').textContent = name;
+
+      window.EJS_player    = '#game';
+      window.EJS_core      = core || 'gb';
+      window.EJS_gameUrl   = url;
+      window.EJS_gameName  = name;
+      window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
+
+      const script = document.createElement('script');
+      script.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
+      document.body.appendChild(script);
+    }
+
+    function goBack() {
+      // Full reload to cleanly tear down the emulator
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      location.reload();
+    }
+  </script>
+
+</body>
+</html>
